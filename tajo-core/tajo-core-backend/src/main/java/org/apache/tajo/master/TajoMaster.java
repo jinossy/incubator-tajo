@@ -27,6 +27,7 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.service.CompositeService;
 import org.apache.hadoop.util.ShutdownHookManager;
 import org.apache.hadoop.util.StringUtils;
@@ -382,6 +383,8 @@ public class TajoMaster extends CompositeService {
         LOG.error(e);
       }
     }
+
+    IOUtils.cleanup(LOG, catalogServer);
 
     if(systemMetrics != null) {
       systemMetrics.stop();

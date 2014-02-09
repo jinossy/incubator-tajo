@@ -26,33 +26,32 @@ import org.apache.hadoop.util.ShutdownHookManager;
 import org.apache.hadoop.yarn.event.Dispatcher;
 import org.apache.hadoop.yarn.event.Event;
 import org.apache.hadoop.yarn.event.EventHandler;
-import org.apache.hadoop.yarn.exceptions.YarnRuntimeException;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher {
 
   private static final Log LOG = LogFactory.getLog(TajoAsyncDispatcher.class);
 
-  private final BlockingQueue<Event> eventQueue;
-  private volatile boolean stopped = false;
+  private final AbstractQueue<Event> eventQueue;
+  protected AtomicBoolean stopped = new AtomicBoolean(false);
 
   private Thread eventHandlingThread;
+  private final CountDownLatch stopLock = new CountDownLatch(1);
   protected final Map<Class<? extends Enum>, EventHandler> eventDispatchers;
   private boolean exitOnDispatchException;
 
   private String id;
 
   public TajoAsyncDispatcher(String id) {
-    this(id, new LinkedBlockingQueue<Event>());
+    this(id, new ConcurrentLinkedQueue<Event>());
   }
 
-  public TajoAsyncDispatcher(String id, BlockingQueue<Event> eventQueue) {
+  public TajoAsyncDispatcher(String id, AbstractQueue<Event> eventQueue) {
     super(TajoAsyncDispatcher.class.getName());
     this.id = id;
     this.eventQueue = eventQueue;
@@ -63,21 +62,29 @@ public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher 
     return new Runnable() {
       @Override
       public void run() {
-        while (!stopped && !Thread.currentThread().isInterrupted()) {
+        while (!stopped.get() && !Thread.currentThread().isInterrupted()) {
           Event event;
-          try {
-            event = eventQueue.take();
+          event = eventQueue.poll();
+
+          if(event != null){
             if(LOG.isDebugEnabled()) {
               LOG.debug(id + ",event take:" + event.getType() + "," + event);
             }
-          } catch(InterruptedException ie) {
-            if (!stopped) {
-              LOG.warn("AsyncDispatcher thread interrupted");
+            dispatch(event);
+          } else {
+            try {
+              synchronized (eventHandlingThread) {
+                eventHandlingThread.wait(1000);
+              }
+            } catch (InterruptedException e) {
+              if (!stopped.get()) {
+                LOG.warn("AsyncDispatcher thread interrupted");
+              }
+              break;
             }
-            return;
           }
-          dispatch(event);
         }
+        stopLock.countDown();
       }
     };
   }
@@ -95,22 +102,27 @@ public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher 
     //start all the components
     super.start();
     eventHandlingThread = new Thread(createThread());
-    eventHandlingThread.setName("AsyncDispatcher event handler");
+    eventHandlingThread.setName("AsyncDispatcher event handler: " + id);
     eventHandlingThread.start();
 
     LOG.info("AsyncDispatcher started:" + id);
+    stoped += 1;
   }
-
+  private int stoped = 0;
   @Override
   public synchronized void stop() {
-    if(stopped) {
+    if(stopped.getAndSet(true)) {
       return;
     }
-    stopped = true;
+
     if (eventHandlingThread != null) {
-      eventHandlingThread.interrupt();
+      synchronized (eventHandlingThread) {
+        //if handler is busy, this can't wake up thread
+        eventHandlingThread.notifyAll();
+      }
       try {
-        eventHandlingThread.join();
+        // gracefully stop
+        stopLock.await(1000, TimeUnit.MILLISECONDS);
       } catch (InterruptedException ie) {
         LOG.warn("Interrupted Exception while stopping");
       }
@@ -118,7 +130,6 @@ public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher 
 
     // stop all the components
     super.stop();
-
     LOG.info("AsyncDispatcher stopped:" + id);
   }
 
@@ -185,23 +196,25 @@ public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher 
       if (qSize !=0 && qSize %1000 == 0) {
         LOG.info("Size of event-queue is " + qSize);
       }
-      int remCapacity = eventQueue.remainingCapacity();
+
+
+      int remCapacity = Integer.MAX_VALUE -  eventQueue.size();
       if (remCapacity < 1000) {
         LOG.warn("Very low remaining capacity in the event-queue: "
             + remCapacity);
       }
-      try {
-        if(LOG.isDebugEnabled()) {
-          LOG.debug(id + ",add event:" +
-              event.getType() + "," + event + "," +
-              (eventHandlingThread == null ? "null" : eventHandlingThread.isAlive()));
+
+      if(LOG.isDebugEnabled()) {
+        LOG.debug(id + ",add event:" +
+            event.getType() + "," + event + "," +
+            (eventHandlingThread == null ? "null" : eventHandlingThread.isAlive()));
+      }
+
+      eventQueue.offer(event);
+      if (eventHandlingThread != null) {
+        synchronized (eventHandlingThread) {
+          eventHandlingThread.notifyAll();
         }
-        eventQueue.put(event);
-      } catch (InterruptedException e) {
-        if (!stopped) {
-          LOG.warn("AsyncDispatcher thread interrupted", e);
-        }
-        throw new YarnRuntimeException(e);
       }
     }
   }

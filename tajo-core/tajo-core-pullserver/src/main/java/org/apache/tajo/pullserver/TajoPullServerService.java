@@ -55,12 +55,15 @@ import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.*;
 import org.jboss.netty.channel.group.ChannelGroup;
 import org.jboss.netty.channel.group.DefaultChannelGroup;
+import org.jboss.netty.channel.socket.nio.NioServerBossPool;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+import org.jboss.netty.channel.socket.nio.NioWorkerPool;
 import org.jboss.netty.handler.codec.frame.TooLongFrameException;
 import org.jboss.netty.handler.codec.http.*;
 import org.jboss.netty.handler.ssl.SslHandler;
 import org.jboss.netty.handler.stream.ChunkedWriteHandler;
 import org.jboss.netty.util.CharsetUtil;
+import org.jboss.netty.util.ThreadNameDeterminer;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -209,10 +212,13 @@ public class TajoPullServerService extends AbstractService {
       ThreadFactory workerFactory = new ThreadFactoryBuilder()
           .setNameFormat("PullServerAuxService Netty Worker #%d")
           .build();
+      NioServerBossPool bossPool =
+          new NioServerBossPool(Executors.newCachedThreadPool(bossFactory), 1, ThreadNameDeterminer.CURRENT);
 
-      selector = new NioServerSocketChannelFactory(
-          Executors.newCachedThreadPool(bossFactory),
-          Executors.newCachedThreadPool(workerFactory));
+      NioWorkerPool workerPool = new NioWorkerPool(Executors.newCachedThreadPool(workerFactory),
+          Runtime.getRuntime().availableProcessors() * 2, ThreadNameDeterminer.CURRENT);
+
+      selector = new NioServerSocketChannelFactory(bossPool, workerPool);
 
       localFS = new LocalFileSystem();
       super.init(new Configuration(conf));

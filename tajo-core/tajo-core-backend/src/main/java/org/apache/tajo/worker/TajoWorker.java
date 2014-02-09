@@ -324,7 +324,7 @@ public class TajoWorker extends CompositeService {
     }
 
     if(connPool != null) {
-      connPool.close();
+      connPool.shutdown();
     }
 
     if(webServer != null && webServer.isAlive()) {

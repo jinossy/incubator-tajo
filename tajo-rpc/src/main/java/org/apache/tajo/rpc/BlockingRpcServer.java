@@ -61,6 +61,15 @@ public class BlockingRpcServer extends NettyServerBase {
   private class ServerHandler extends SimpleChannelUpstreamHandler {
 
     @Override
+    public void channelOpen(ChannelHandlerContext ctx, ChannelStateEvent evt)
+        throws Exception {
+
+      accepted.add(evt.getChannel());
+      LOG.info(String.format(serviceName + " current number of connections (%d)", accepted.size()));
+      super.channelOpen(ctx, evt);
+    }
+
+    @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e)
         throws Exception {
       final RpcRequest request = (RpcRequest) e.getMessage();

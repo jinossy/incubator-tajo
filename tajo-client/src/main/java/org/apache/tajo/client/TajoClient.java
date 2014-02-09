@@ -191,9 +191,10 @@ public class TajoClient {
         QueryMasterClientProtocolService.BlockingInterface queryMasterService = qmClient.getStub();
         res = queryMasterService.getQueryStatus(null, builder.build());
       } catch (Exception e) {
+        connPool.closeConnection(qmClient);
         throw new ServiceException(e.getMessage(), e);
       } finally {
-        connPool.closeConnection(qmClient);
+        connPool.releaseConnection(qmClient);
       }
     } else {
       NettyClientBase tmClient = null;
@@ -215,15 +216,17 @@ public class TajoClient {
 
             queryMasterMap.put(queryId, qmAddr);
           } catch (Exception e) {
+            connPool.closeConnection(qmClient);
             throw new ServiceException(e.getMessage(), e);
           } finally {
-            connPool.closeConnection(qmClient);
+            connPool.releaseConnection(qmClient);
           }
         }
       } catch (Exception e) {
+        connPool.closeConnection(tmClient);
         throw new ServiceException(e.getMessage(), e);
       } finally {
-        connPool.closeConnection(tmClient);
+        connPool.releaseConnection(tmClient);
       }
     }
     return new QueryStatus(res);
@@ -305,9 +308,10 @@ public class TajoClient {
 
       return response;
     } catch (Exception e) {
+      connPool.closeConnection(client);
       throw new ServiceException(e.getMessage(), e);
     } finally {
-      connPool.closeConnection(client);
+      connPool.releaseConnection(client);
     }
   }
 
@@ -488,9 +492,10 @@ public class TajoClient {
       }
     } catch(Exception e) {
       LOG.debug("Error when checking for application status", e);
+      connPool.closeConnection(tmClient);
       return false;
     } finally {
-      connPool.closeConnection(tmClient);
+      connPool.releaseConnection(tmClient);
     }
 
     return true;

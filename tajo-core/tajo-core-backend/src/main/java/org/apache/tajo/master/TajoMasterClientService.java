@@ -88,6 +88,7 @@ public class TajoMasterClientService extends AbstractService {
       LOG.error(e);
     }
     server.start();
+
     bindAddress = NetUtils.getConnectAddress(server.getListenAddress());
     this.conf.setVar(ConfVars.TAJO_MASTER_CLIENT_RPC_ADDRESS, NetUtils.normalizeInetSocketAddress(bindAddress));
     LOG.info("Instantiated TajoMasterClientService at " + this.bindAddress);

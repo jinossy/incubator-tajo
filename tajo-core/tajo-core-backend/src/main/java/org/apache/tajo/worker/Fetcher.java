@@ -25,8 +25,12 @@ import org.apache.hadoop.io.IOUtils;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.*;
+import org.jboss.netty.channel.socket.nio.NioClientBossPool;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
+import org.jboss.netty.channel.socket.nio.NioWorkerPool;
 import org.jboss.netty.handler.codec.http.*;
+import org.jboss.netty.util.HashedWheelTimer;
+import org.jboss.netty.util.ThreadNameDeterminer;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -65,9 +69,25 @@ public class Fetcher {
   private static final ThreadFactory workerFactory = new ThreadFactoryBuilder()
       .setNameFormat("Fetcher Netty Worker #%d")
       .build();
-  private static final ChannelFactory factory = new NioClientSocketChannelFactory(
-      Executors.newCachedThreadPool(bossFactory),
-      Executors.newCachedThreadPool(workerFactory));
+  private static final ChannelFactory factory;
+
+  static {
+
+    ThreadFactory bossFactory = new ThreadFactoryBuilder()
+        .setNameFormat("Fetcher Boss #%d")
+        .build();
+    ThreadFactory workerFactory = new ThreadFactoryBuilder()
+        .setNameFormat("Fetcher Worker #%d")
+        .build();
+
+    //shared woker and boss poll
+    NioClientBossPool bossPool = new NioClientBossPool(Executors.newCachedThreadPool(bossFactory), 1,
+        new HashedWheelTimer(), ThreadNameDeterminer.CURRENT);
+    NioWorkerPool workerPool = new NioWorkerPool(Executors.newCachedThreadPool(workerFactory),
+        Runtime.getRuntime().availableProcessors() * 2, ThreadNameDeterminer.CURRENT);
+
+    factory = new NioClientSocketChannelFactory(bossPool, workerPool);
+  }
 
   private ClientBootstrap bootstrap;
 

@@ -160,10 +160,10 @@ public class QueryMasterTask extends CompositeService {
 
   @Override
   public void stop() {
-    if(stopped.get()) {
+
+    if(stopped.getAndSet(true)) {
       return;
     }
-    stopped.set(true);
 
     LOG.info("Stopping QueryMasterTask:" + queryId);
 

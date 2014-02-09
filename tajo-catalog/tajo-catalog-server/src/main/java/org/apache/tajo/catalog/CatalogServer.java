@@ -175,7 +175,7 @@ public class CatalogServer extends AbstractService {
     try {
       store.close();
     } catch (IOException ioe) {
-      LOG.error(ioe);
+      LOG.error(ioe.getMessage(), ioe);
     }
     super.stop();
   }

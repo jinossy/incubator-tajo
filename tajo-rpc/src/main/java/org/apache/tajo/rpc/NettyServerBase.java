@@ -18,6 +18,7 @@
 
 package org.apache.tajo.rpc;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.tajo.util.NetUtils;
@@ -25,7 +26,12 @@ import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFactory;
 import org.jboss.netty.channel.ChannelPipelineFactory;
+import org.jboss.netty.channel.group.ChannelGroup;
+import org.jboss.netty.channel.group.DefaultChannelGroup;
+import org.jboss.netty.channel.socket.nio.NioServerBossPool;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+import org.jboss.netty.channel.socket.nio.NioWorkerPool;
+import org.jboss.netty.util.ThreadNameDeterminer;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
@@ -33,6 +39,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.util.Random;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class NettyServerBase {
@@ -47,6 +54,7 @@ public class NettyServerBase {
   protected ChannelPipelineFactory pipelineFactory;
   protected ServerBootstrap bootstrap;
   protected Channel channel;
+  protected ChannelGroup accepted = new DefaultChannelGroup();
 
   private InetSocketAddress initIsa;
 
@@ -64,9 +72,22 @@ public class NettyServerBase {
   }
 
   public void init(ChannelPipelineFactory pipeline) {
-    this.factory =
-        new NioServerSocketChannelFactory(Executors.newCachedThreadPool(),
-            Executors.newCachedThreadPool());
+
+    ThreadFactory bossFactory = new ThreadFactoryBuilder()
+        .setNameFormat(serviceName + " RPC Boss #%d")
+        .build();
+    ThreadFactory workerFactory = new ThreadFactoryBuilder()
+        .setNameFormat(serviceName + " RPC Worker #%d")
+        .build();
+
+    //shared woker and boss poll
+    NioServerBossPool bossPool =
+        new NioServerBossPool(Executors.newCachedThreadPool(bossFactory), 1, ThreadNameDeterminer.CURRENT);
+    NioWorkerPool workerPool =
+        new NioWorkerPool(Executors.newCachedThreadPool(workerFactory),
+        Runtime.getRuntime().availableProcessors() * 1, ThreadNameDeterminer.CURRENT);
+
+    factory = new NioServerSocketChannelFactory(bossPool, workerPool);
 
     pipelineFactory = pipeline;
     bootstrap = new ServerBootstrap(factory);
@@ -114,8 +135,10 @@ public class NettyServerBase {
     if(channel != null) {
       channel.close().awaitUninterruptibly();
     }
-    if(factory != null) {
-      factory.releaseExternalResources();
+    accepted.close().awaitUninterruptibly();
+
+    if(bootstrap != null) {
+      bootstrap.releaseExternalResources();
     }
     LOG.info("Rpc (" + serviceName + ") listened on "
         + NetUtils.normalizeInetSocketAddress(bindAddress)+ ") shutdown");

@@ -18,13 +18,25 @@
 
 package org.apache.tajo.rpc;
 
+import com.google.common.base.Objects;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.tajo.conf.TajoConf;
 import org.apache.tajo.util.TUtil;
+import org.jboss.netty.channel.group.ChannelGroup;
+import org.jboss.netty.channel.group.DefaultChannelGroup;
+import org.jboss.netty.channel.socket.ClientSocketChannelFactory;
+import org.jboss.netty.channel.socket.nio.NioClientBossPool;
+import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
+import org.jboss.netty.channel.socket.nio.NioWorkerPool;
+import org.jboss.netty.util.HashedWheelTimer;
+import org.jboss.netty.util.ThreadNameDeterminer;
 
 import java.net.InetSocketAddress;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 public class RpcConnectionPool {
   private static final Log LOG = LogFactory.getLog(RpcConnectionPool.class);
@@ -34,6 +46,46 @@ public class RpcConnectionPool {
   private static RpcConnectionPool instance;
 
   private TajoConf conf;
+  private ChannelGroup accepted = new DefaultChannelGroup();
+  //netty default value
+  protected static final int DEFAULT_IO_THREADS = Runtime.getRuntime().availableProcessors() * 2;
+  protected static int nettyWorkerCount;
+
+  /**
+   * make this factory static thus all clients can share its thread pool.
+   * NioClientSocketChannelFactory has only one method newChannel() visible for user, which is thread-safe
+   */
+  private static final ClientSocketChannelFactory factory;
+  private static final NioClientBossPool bossPool;
+  private static final NioWorkerPool workerPool;
+
+  static {
+    TajoConf conf = new TajoConf();
+
+    nettyWorkerCount = conf.getIntVar(TajoConf.ConfVars.RPC_CLIENT_SOCKET_IO_THREADS);
+    if (nettyWorkerCount <= 0) {
+      nettyWorkerCount = DEFAULT_IO_THREADS;
+    }
+
+    ThreadFactory bossFactory = new ThreadFactoryBuilder()
+        .setNameFormat("RpcConnectionPool Boss #%d")
+        .build();
+    ThreadFactory workerFactory = new ThreadFactoryBuilder()
+        .setNameFormat("RpcConnectionPool Worker #%d")
+        .build();
+
+    //shared woker and boss poll
+    bossPool = new NioClientBossPool(Executors.newCachedThreadPool(bossFactory), 1,
+        new HashedWheelTimer(), ThreadNameDeterminer.CURRENT);
+    workerPool = new NioWorkerPool(Executors.newCachedThreadPool(workerFactory), nettyWorkerCount,
+        ThreadNameDeterminer.CURRENT);
+
+    factory = new NioClientSocketChannelFactory(bossPool, workerPool);
+  }
+
+  public static ClientSocketChannelFactory getChannelFactory(){
+    return factory;
+  }
 
   private RpcConnectionPool(TajoConf conf) {
     this.conf = conf;
@@ -48,25 +100,52 @@ public class RpcConnectionPool {
   }
 
   private NettyClientBase makeConnection(RpcConnectionKey rpcConnectionKey) throws Exception {
+    NettyClientBase client;
     if(rpcConnectionKey.asyncMode) {
-      return new AsyncRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr);
+      client = new AsyncRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr, factory);
     } else {
-      return new BlockingRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr);
+      client = new BlockingRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr, factory);
     }
+    accepted.add(client.getChannel());
+    return client;
   }
 
   public NettyClientBase getConnection(InetSocketAddress addr,
-      Class protocolClass, boolean asyncMode) throws Exception {
+                                       Class protocolClass, boolean asyncMode) throws Exception {
     RpcConnectionKey key = new RpcConnectionKey(addr, protocolClass, asyncMode);
-    synchronized(connections) {
-      if(!connections.containsKey(key)) {
+    NettyClientBase client;
+
+    synchronized (connections) {
+      if (!connections.containsKey(key)) {
         connections.put(key, makeConnection(key));
       }
-      return connections.get(key);
+      client = connections.get(key);
     }
+
+    if (!client.getChannel().isOpen() || !client.getChannel().isConnected()) {
+      LOG.warn("Try to reconnect : " + client.getChannel().getRemoteAddress());
+      client.reconnect();
+    }
+    return client;
   }
 
   public void releaseConnection(NettyClientBase client) {
+    if (client == null) return;
+
+    try {
+      if(!client.getChannel().isOpen()){
+//        synchronized(connections) {
+//          connections.remove(client.getKey());
+//        }
+//        client.close();
+      }
+      if(LOG.isDebugEnabled()) {
+        LOG.debug("Current Connections [" + connections.size() + "] Accepted: " + accepted.size());
+
+      }
+    } catch (Exception e) {
+      LOG.error("Can't close connection:" + client.getKey() + ":" + e.getMessage(), e);
+    }
   }
 
   public void closeConnection(NettyClientBase client) {
@@ -99,8 +178,13 @@ public class RpcConnectionPool {
           LOG.error("close client pool error", e);
         }
       }
+      accepted.close().awaitUninterruptibly();
       connections.clear();
     }
+  }
+
+  public synchronized void shutdown(){
+    factory.releaseExternalResources();
   }
 
   static class RpcConnectionKey {
@@ -117,7 +201,7 @@ public class RpcConnectionPool {
 
     @Override
     public String toString() {
-      return protocolClass + "," + addr + "," + asyncMode;
+      return "["+ protocolClass + "] " + addr + "," + asyncMode;
     }
 
     @Override
@@ -131,7 +215,7 @@ public class RpcConnectionPool {
 
     @Override
     public int hashCode() {
-      return toString().hashCode();
+      return Objects.hashCode(protocolClass, addr, asyncMode);
     }
   }
 }
