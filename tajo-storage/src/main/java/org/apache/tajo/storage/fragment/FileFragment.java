@@ -56,10 +56,12 @@ public class FileFragment implements Fragment, Comparable<FileFragment>, Cloneab
         blockLocation.getHosts(), diskIds);
   }
 
+  public FileFragment(String tableName, Path uri, long start, long length, String[] hosts, int[] diskIds) {
+    this.set(tableName, uri, start, length, hosts, diskIds);
+  }
   // Non splittable
   public FileFragment(String tableName, Path uri, long start, long length, String[] hosts) {
-    this.set(tableName, uri, start, length, null, null);
-    this.hosts = hosts;
+    this.set(tableName, uri, start, length, hosts, null);
   }
 
   public FileFragment(String fragmentId, Path path, long start, long length) {

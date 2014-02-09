@@ -400,13 +400,7 @@ public abstract class AbstractStorageManager {
     return scanner.isSplittable();
   }
 
-
-  protected long computeSplitSize(long blockSize, long minSize,
-                                  long maxSize) {
-    return Math.max(minSize, Math.min(maxSize, blockSize));
-  }
-
-  private static final double SPLIT_SLOP = 1.1;   // 10% slop
+  private static final double SPLIT_SLOP = 1.005;   // 0.5% slop
 
   protected int getBlockIndex(BlockLocation[] blkLocations,
                               long offset) {
@@ -434,7 +428,12 @@ public abstract class AbstractStorageManager {
 
   protected FileFragment makeSplit(String fragmentId, TableMeta meta, Path file, long start, long length,
                                    String[] hosts) {
-    return new FileFragment(fragmentId, file, start, length, hosts);
+    return new FileFragment(fragmentId, file, start, length, hosts, null);
+  }
+
+  protected FileFragment makeSplit(String fragmentId, TableMeta meta, Path file, long start, long length,
+                                   String[] hosts, int[] diskIds) {
+    return new FileFragment(fragmentId, file, start, length, hosts, diskIds);
   }
 
   protected FileFragment makeSplit(String fragmentId, TableMeta meta, Path file, BlockLocation blockLocation,
@@ -472,7 +471,7 @@ public abstract class AbstractStorageManager {
       Map.Entry<String, Integer> entry = entries.get((entries.size() - 1) - i);
       hosts[i] = entry.getKey();
     }
-    return new FileFragment(fragmentId, file, start, length, hosts);
+    return new FileFragment(fragmentId, file, start, length, hosts, null);
   }
 
   /**
@@ -557,10 +556,23 @@ public abstract class AbstractStorageManager {
           BlockStorageLocation[] blockStorageLocations = ((DistributedFileSystem) fs)
               .getFileBlockStorageLocations(Arrays.asList(blkLocations));
           if (splittable) {
-            for (BlockStorageLocation blockStorageLocation : blockStorageLocations) {
-              splits.add(makeSplit(tableName, meta, path, blockStorageLocation, getDiskIds(blockStorageLocation
-                  .getVolumeIds())));
+            long blockSize = file.getBlockSize();
+            long bytesRemaining = length;
+
+            while (((double) bytesRemaining) / blockSize > SPLIT_SLOP) {
+              int blkIndex = getBlockIndex(blockStorageLocations, length - bytesRemaining);
+              splits.add(makeSplit(tableName, meta, path, length - bytesRemaining, blockSize,
+                  blockStorageLocations[blkIndex].getHosts(),
+                  getDiskIds(blockStorageLocations[blkIndex].getVolumeIds())));
+              bytesRemaining -= blockSize;
             }
+            if (bytesRemaining > 0) {
+              int blkIndex = getBlockIndex(blockStorageLocations, length - bytesRemaining);
+              splits.add(makeSplit(tableName, meta, path, length - bytesRemaining, bytesRemaining,
+                  blockStorageLocations[blkIndex].getHosts(),
+                  getDiskIds(blockStorageLocations[blkIndex].getVolumeIds())));
+            }
+
           } else { // Non splittable
             long blockSize = blockStorageLocations[0].getLength();
             if (blockSize >= length) {
