@@ -73,8 +73,8 @@ public class TajoClient {
     this.conf = conf;
     this.conf.set("tajo.disk.scheduler.report.interval", "0");
     this.tajoMasterAddr = addr;
-
-    connPool = RpcConnectionPool.getPool(conf);
+    int ioThreadNum = conf.getIntVar(TajoConf.ConfVars.RPC_CLIENT_IO_THREAD_NUM);
+    connPool = RpcConnectionPool.newPool(conf, getClass().getSimpleName(), ioThreadNum);
   }
 
   public TajoClient(InetSocketAddress addr) throws IOException {
@@ -87,7 +87,7 @@ public class TajoClient {
 
   public void close() {
     if(connPool != null) {
-      connPool.close();
+      connPool.shutdown();
     }
     queryMasterMap.clear();
   }
@@ -191,7 +191,6 @@ public class TajoClient {
         QueryMasterClientProtocolService.BlockingInterface queryMasterService = qmClient.getStub();
         res = queryMasterService.getQueryStatus(null, builder.build());
       } catch (Exception e) {
-        connPool.closeConnection(qmClient);
         throw new ServiceException(e.getMessage(), e);
       } finally {
         connPool.releaseConnection(qmClient);
@@ -216,14 +215,12 @@ public class TajoClient {
 
             queryMasterMap.put(queryId, qmAddr);
           } catch (Exception e) {
-            connPool.closeConnection(qmClient);
             throw new ServiceException(e.getMessage(), e);
           } finally {
             connPool.releaseConnection(qmClient);
           }
         }
       } catch (Exception e) {
-        connPool.closeConnection(tmClient);
         throw new ServiceException(e.getMessage(), e);
       } finally {
         connPool.releaseConnection(tmClient);
@@ -308,7 +305,6 @@ public class TajoClient {
 
       return response;
     } catch (Exception e) {
-      connPool.closeConnection(client);
       throw new ServiceException(e.getMessage(), e);
     } finally {
       connPool.releaseConnection(client);
@@ -492,7 +488,6 @@ public class TajoClient {
       }
     } catch(Exception e) {
       LOG.debug("Error when checking for application status", e);
-      connPool.closeConnection(tmClient);
       return false;
     } finally {
       connPool.releaseConnection(tmClient);

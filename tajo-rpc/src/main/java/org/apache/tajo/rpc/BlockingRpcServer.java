@@ -38,7 +38,8 @@ public class BlockingRpcServer extends NettyServerBase {
 
   public BlockingRpcServer(final Class<?> protocol,
                            final Object instance,
-                           final InetSocketAddress bindAddress)
+                           final InetSocketAddress bindAddress,
+                           final int ioThreadNum)
       throws Exception {
 
     super(protocol.getSimpleName(), bindAddress);
@@ -55,7 +56,7 @@ public class BlockingRpcServer extends NettyServerBase {
     this.pipeline = new ProtoPipelineFactory(new ServerHandler(),
         RpcRequest.getDefaultInstance());
 
-    super.init(this.pipeline);
+    super.init(this.pipeline, ioThreadNum);
   }
 
   private class ServerHandler extends SimpleChannelUpstreamHandler {
@@ -65,7 +66,9 @@ public class BlockingRpcServer extends NettyServerBase {
         throws Exception {
 
       accepted.add(evt.getChannel());
-      LOG.info(String.format(serviceName + " current number of connections (%d)", accepted.size()));
+      if(LOG.isDebugEnabled()){
+        LOG.debug(String.format(serviceName + " accepted number of connections (%d)", accepted.size()));
+      }
       super.channelOpen(ctx, evt);
     }
 

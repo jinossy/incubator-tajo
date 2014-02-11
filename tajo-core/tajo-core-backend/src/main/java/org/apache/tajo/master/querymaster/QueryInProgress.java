@@ -115,7 +115,9 @@ public class QueryInProgress extends CompositeService {
       }
 
       try {
-        wait(100);
+        synchronized (this){
+          wait(100);
+        }
       } catch (InterruptedException e) {
         break;
       }

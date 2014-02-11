@@ -58,7 +58,7 @@ public class AsyncRpcClient extends NettyClientBase {
    */
   AsyncRpcClient(final Class<?> protocol,
                  final InetSocketAddress addr) throws Exception {
-    this(protocol, addr, RpcConnectionPool.getChannelFactory());
+    this(protocol, addr, NettyWokerFactory.getSharedClientChannelFactory());
   }
 
   AsyncRpcClient(final Class<?> protocol,

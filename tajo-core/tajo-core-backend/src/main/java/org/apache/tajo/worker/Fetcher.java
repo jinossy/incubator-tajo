@@ -18,19 +18,14 @@
 
 package org.apache.tajo.worker;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.io.IOUtils;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.*;
-import org.jboss.netty.channel.socket.nio.NioClientBossPool;
-import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
-import org.jboss.netty.channel.socket.nio.NioWorkerPool;
+import org.jboss.netty.channel.socket.ClientSocketChannelFactory;
 import org.jboss.netty.handler.codec.http.*;
-import org.jboss.netty.util.HashedWheelTimer;
-import org.jboss.netty.util.ThreadNameDeterminer;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -39,8 +34,6 @@ import java.io.RandomAccessFile;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.channels.FileChannel;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
 
 import static org.jboss.netty.channel.Channels.pipeline;
 
@@ -62,36 +55,9 @@ public class Fetcher {
   private long fileLen;
   private int messageReceiveCount;
 
-
-  private static final ThreadFactory bossFactory = new ThreadFactoryBuilder()
-      .setNameFormat("Fetcher Netty Boss #%d")
-      .build();
-  private static final ThreadFactory workerFactory = new ThreadFactoryBuilder()
-      .setNameFormat("Fetcher Netty Worker #%d")
-      .build();
-  private static final ChannelFactory factory;
-
-  static {
-
-    ThreadFactory bossFactory = new ThreadFactoryBuilder()
-        .setNameFormat("Fetcher Boss #%d")
-        .build();
-    ThreadFactory workerFactory = new ThreadFactoryBuilder()
-        .setNameFormat("Fetcher Worker #%d")
-        .build();
-
-    //shared woker and boss poll
-    NioClientBossPool bossPool = new NioClientBossPool(Executors.newCachedThreadPool(bossFactory), 1,
-        new HashedWheelTimer(), ThreadNameDeterminer.CURRENT);
-    NioWorkerPool workerPool = new NioWorkerPool(Executors.newCachedThreadPool(workerFactory),
-        Runtime.getRuntime().availableProcessors() * 2, ThreadNameDeterminer.CURRENT);
-
-    factory = new NioClientSocketChannelFactory(bossPool, workerPool);
-  }
-
   private ClientBootstrap bootstrap;
 
-  public Fetcher(URI uri, File file) {
+  public Fetcher(URI uri, File file, ClientSocketChannelFactory factory) {
     this.uri = uri;
     this.file = file;
 

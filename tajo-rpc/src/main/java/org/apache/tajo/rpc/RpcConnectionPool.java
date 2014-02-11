@@ -19,7 +19,6 @@
 package org.apache.tajo.rpc;
 
 import com.google.common.base.Objects;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.tajo.conf.TajoConf;
@@ -27,84 +26,43 @@ import org.apache.tajo.util.TUtil;
 import org.jboss.netty.channel.group.ChannelGroup;
 import org.jboss.netty.channel.group.DefaultChannelGroup;
 import org.jboss.netty.channel.socket.ClientSocketChannelFactory;
-import org.jboss.netty.channel.socket.nio.NioClientBossPool;
-import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
-import org.jboss.netty.channel.socket.nio.NioWorkerPool;
-import org.jboss.netty.util.HashedWheelTimer;
-import org.jboss.netty.util.ThreadNameDeterminer;
 
 import java.net.InetSocketAddress;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 
 public class RpcConnectionPool {
   private static final Log LOG = LogFactory.getLog(RpcConnectionPool.class);
 
   private Map<RpcConnectionKey, NettyClientBase> connections = TUtil.newConcurrentHashMap();
+  private ChannelGroup accepted = new DefaultChannelGroup();
 
   private static RpcConnectionPool instance;
+  private final ClientSocketChannelFactory channelFactory;
+  private final TajoConf conf;
 
-  private TajoConf conf;
-  private ChannelGroup accepted = new DefaultChannelGroup();
-  //netty default value
-  protected static final int DEFAULT_IO_THREADS = Runtime.getRuntime().availableProcessors() * 2;
-  protected static int nettyWorkerCount;
-
-  /**
-   * make this factory static thus all clients can share its thread pool.
-   * NioClientSocketChannelFactory has only one method newChannel() visible for user, which is thread-safe
-   */
-  private static final ClientSocketChannelFactory factory;
-  private static final NioClientBossPool bossPool;
-  private static final NioWorkerPool workerPool;
-
-  static {
-    TajoConf conf = new TajoConf();
-
-    nettyWorkerCount = conf.getIntVar(TajoConf.ConfVars.RPC_CLIENT_SOCKET_IO_THREADS);
-    if (nettyWorkerCount <= 0) {
-      nettyWorkerCount = DEFAULT_IO_THREADS;
-    }
-
-    ThreadFactory bossFactory = new ThreadFactoryBuilder()
-        .setNameFormat("RpcConnectionPool Boss #%d")
-        .build();
-    ThreadFactory workerFactory = new ThreadFactoryBuilder()
-        .setNameFormat("RpcConnectionPool Worker #%d")
-        .build();
-
-    //shared woker and boss poll
-    bossPool = new NioClientBossPool(Executors.newCachedThreadPool(bossFactory), 1,
-        new HashedWheelTimer(), ThreadNameDeterminer.CURRENT);
-    workerPool = new NioWorkerPool(Executors.newCachedThreadPool(workerFactory), nettyWorkerCount,
-        ThreadNameDeterminer.CURRENT);
-
-    factory = new NioClientSocketChannelFactory(bossPool, workerPool);
-  }
-
-  public static ClientSocketChannelFactory getChannelFactory(){
-    return factory;
-  }
-
-  private RpcConnectionPool(TajoConf conf) {
+  private RpcConnectionPool(TajoConf conf, ClientSocketChannelFactory channelFactory) {
     this.conf = conf;
+    this.channelFactory =  channelFactory;
   }
 
   public synchronized static RpcConnectionPool getPool(TajoConf conf) {
     if(instance == null) {
-      instance = new RpcConnectionPool(conf);
+      instance = new RpcConnectionPool(conf, NettyWokerFactory.getSharedClientChannelFactory());
     }
-
     return instance;
+  }
+
+  public synchronized static RpcConnectionPool newPool(TajoConf conf, String poolName, int ioThreadNum) {
+    return new RpcConnectionPool(conf, NettyWokerFactory.createClientChannelFactory(poolName, ioThreadNum));
   }
 
   private NettyClientBase makeConnection(RpcConnectionKey rpcConnectionKey) throws Exception {
     NettyClientBase client;
     if(rpcConnectionKey.asyncMode) {
-      client = new AsyncRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr, factory);
+      client = new AsyncRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr, channelFactory);
     } else {
-      client = new BlockingRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr, factory);
+      client = new BlockingRpcClient(rpcConnectionKey.protocolClass, rpcConnectionKey.addr, channelFactory);
     }
     accepted.add(client.getChannel());
     return client;
@@ -123,8 +81,8 @@ public class RpcConnectionPool {
     }
 
     if (!client.getChannel().isOpen() || !client.getChannel().isConnected()) {
-      LOG.warn("Try to reconnect : " + client.getChannel().getRemoteAddress());
-      client.reconnect();
+      LOG.warn("Try to reconnect : " + addr);
+      client.connect(addr);
     }
     return client;
   }
@@ -134,11 +92,15 @@ public class RpcConnectionPool {
 
     try {
       if(!client.getChannel().isOpen()){
-//        synchronized(connections) {
-//          connections.remove(client.getKey());
-//        }
-//        client.close();
+        synchronized(connections) {
+          connections.remove(client.getKey());
+        }
+        client.close();
+        synchronized (accepted){
+          accepted.remove(client.getChannel());
+        }
       }
+
       if(LOG.isDebugEnabled()) {
         LOG.debug("Current Connections [" + connections.size() + "] Accepted: " + accepted.size());
 
@@ -155,12 +117,16 @@ public class RpcConnectionPool {
 
     try {
       if(LOG.isDebugEnabled()) {
-        LOG.debug("CloseConnection [" + client.getKey() + "]");
+        LOG.debug("Close connection [" + client.getKey() + "]");
       }
       synchronized(connections) {
         connections.remove(client.getKey());
       }
       client.close();
+
+      synchronized (accepted){
+        accepted.remove(client.getChannel());
+      }
     } catch (Exception e) {
       LOG.error("Can't close connection:" + client.getKey() + ":" + e.getMessage(), e);
     }
@@ -178,13 +144,21 @@ public class RpcConnectionPool {
           LOG.error("close client pool error", e);
         }
       }
-      accepted.close().awaitUninterruptibly();
       connections.clear();
+    }
+
+    try {
+      accepted.close().awaitUninterruptibly(10, TimeUnit.SECONDS);
+    } catch (Throwable t) {
+      LOG.error(t);
     }
   }
 
   public synchronized void shutdown(){
-    factory.releaseExternalResources();
+    close();
+    if(channelFactory != null){
+      channelFactory.releaseExternalResources();
+    }
   }
 
   static class RpcConnectionKey {
@@ -215,7 +189,7 @@ public class RpcConnectionPool {
 
     @Override
     public int hashCode() {
-      return Objects.hashCode(protocolClass, addr, asyncMode);
+      return Objects.hashCode(addr, asyncMode);
     }
   }
 }

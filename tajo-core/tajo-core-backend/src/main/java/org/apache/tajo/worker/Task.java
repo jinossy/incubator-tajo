@@ -47,11 +47,13 @@ import org.apache.tajo.engine.query.QueryContext;
 import org.apache.tajo.engine.query.QueryUnitRequest;
 import org.apache.tajo.ipc.QueryMasterProtocol.QueryMasterProtocolService;
 import org.apache.tajo.ipc.TajoWorkerProtocol.*;
+import org.apache.tajo.rpc.NettyWokerFactory;
 import org.apache.tajo.rpc.NullCallback;
 import org.apache.tajo.storage.StorageUtil;
 import org.apache.tajo.storage.TupleComparator;
 import org.apache.tajo.storage.fragment.FileFragment;
 import org.apache.tajo.util.ApplicationIdUtils;
+import org.jboss.netty.channel.socket.ClientSocketChannelFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -107,6 +109,7 @@ public class Task {
   private ShuffleType shuffleType = null;
   private Schema finalSchema = null;
   private TupleComparator sortComp = null;
+  private ClientSocketChannelFactory channelFactory = null;
 
   static final String OUTPUT_FILE_PREFIX="part-";
   static final ThreadLocal<NumberFormat> OUTPUT_FILE_FORMAT_SUBQUERY =
@@ -281,12 +284,14 @@ public class Task {
     context.stop();
     context.setState(TaskAttemptState.TA_KILLED);
     setProgressFlag();
+    releaseChannelFactory();
   }
 
   public void abort() {
     aborted = true;
     context.stop();
     context.setState(TaskAttemptState.TA_FAILED);
+    releaseChannelFactory();
   }
 
   public void cleanUp() {
@@ -294,7 +299,6 @@ public class Task {
 
     if (context.getState() == TaskAttemptState.TA_SUCCEEDED) {
       try {
-        // context.getWorkDir() 지우기
         localFS.delete(context.getWorkDir(), true);
         synchronized (taskRunnerContext.getTasks()) {
           taskRunnerContext.getTasks().remove(this.getId());
@@ -348,6 +352,7 @@ public class Task {
       FileFragment[] frags = localizeFetchedData(tableDir, inputTable, descs.get(inputTable).getMeta());
       context.updateAssignedFragments(inputTable, frags);
     }
+    releaseChannelFactory();
   }
 
   public void run() {
@@ -515,7 +520,7 @@ public class Task {
     return tablets;
   }
 
-  private class FetchRunner implements Runnable {
+  private static class FetchRunner implements Runnable {
     private final TaskAttemptContext ctx;
     private final Fetcher fetcher;
 
@@ -538,7 +543,7 @@ public class Task {
             } catch (InterruptedException e) {
               LOG.error(e);
             }
-            LOG.info("Retry on the fetch: " + fetcher.getURI() + " (" + retryNum + ")");
+            LOG.warn("Retry on the fetch: " + fetcher.getURI() + " (" + retryNum + ")");
           }
           try {
             File fetched = fetcher.get();
@@ -560,10 +565,24 @@ public class Task {
     }
   }
 
+  private void releaseChannelFactory(){
+    if(channelFactory != null) {
+      channelFactory.shutdown();
+      channelFactory.releaseExternalResources();
+      channelFactory = null;
+    }
+  }
+
   private List<Fetcher> getFetchRunners(TaskAttemptContext ctx,
                                         List<Fetch> fetches) throws IOException {
 
     if (fetches.size() > 0) {
+
+      releaseChannelFactory();
+
+
+      int ioThreadNum = ctx.getConf().getIntVar(TajoConf.ConfVars.SHUFFLE_FETCHER_PARALLEL_EXECUTION_MAX_NUM);
+      channelFactory = NettyWokerFactory.createClientChannelFactory("Fetcher", ioThreadNum);
       Path inputDir = lDirAllocator.
           getLocalPathToRead(
               getTaskAttemptDir(ctx.getTaskId()).toString(), systemConf);
@@ -578,7 +597,7 @@ public class Task {
           storeDir.mkdirs();
         }
         storeFile = new File(storeDir, "in_" + i);
-        Fetcher fetcher = new Fetcher(URI.create(f.getUrls()), storeFile);
+        Fetcher fetcher = new Fetcher(URI.create(f.getUrls()), storeFile, channelFactory);
         runnerList.add(fetcher);
         i++;
       }

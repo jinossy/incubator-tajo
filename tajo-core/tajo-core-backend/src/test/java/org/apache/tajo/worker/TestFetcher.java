@@ -22,6 +22,8 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.net.NetUtils;
+import org.apache.tajo.rpc.NettyWokerFactory;
+import org.jboss.netty.channel.socket.ClientSocketChannelFactory;
 import org.junit.Before;
 import org.junit.Test;
 import org.apache.tajo.conf.TajoConf;
@@ -70,7 +72,8 @@ public class TestFetcher {
     InetSocketAddress addr = server.getBindAddress();
     
     URI uri = URI.create("http://127.0.0.1:"+addr.getPort() + "/data");
-    Fetcher fetcher = new Fetcher(uri, new File(OUTPUT_DIR + "data"));
+    ClientSocketChannelFactory channelFactory = NettyWokerFactory.createClientChannelFactory("Fetcher", 1);
+    Fetcher fetcher = new Fetcher(uri, new File(OUTPUT_DIR + "data"), channelFactory);
     fetcher.get();
     server.stop();
     

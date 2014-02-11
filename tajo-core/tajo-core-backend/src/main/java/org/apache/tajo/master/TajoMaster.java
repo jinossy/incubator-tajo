@@ -51,6 +51,7 @@ import org.apache.tajo.master.metrics.WorkerResourceMetricsGaugeSet;
 import org.apache.tajo.master.querymaster.QueryJobManager;
 import org.apache.tajo.master.rm.TajoWorkerResourceManager;
 import org.apache.tajo.master.rm.WorkerResourceManager;
+import org.apache.tajo.rpc.NettyWokerFactory;
 import org.apache.tajo.storage.AbstractStorageManager;
 import org.apache.tajo.storage.StorageManagerFactory;
 import org.apache.tajo.util.ClassUtil;
@@ -389,6 +390,8 @@ public class TajoMaster extends CompositeService {
     if(systemMetrics != null) {
       systemMetrics.stop();
     }
+
+    NettyWokerFactory.shutdown();
 
     super.stop();
     LOG.info("Tajo Master main thread exiting");

@@ -149,10 +149,9 @@ public class CatalogServer extends AbstractService {
   public void start() {
     String serverAddr = conf.getVar(ConfVars.CATALOG_ADDRESS);
     InetSocketAddress initIsa = NetUtils.createSocketAddr(serverAddr);
+    int nettyWorkerNum = conf.getIntVar(ConfVars.CATALOG_RPC_SERVER_IO_THREAD_NUM);
     try {
-      this.rpcServer = new BlockingRpcServer(
-          CatalogProtocol.class,
-          handler, initIsa);
+      this.rpcServer = new BlockingRpcServer(CatalogProtocol.class, handler, initIsa, nettyWorkerNum);
       this.rpcServer.start();
 
       this.bindAddress = NetUtils.getConnectAddress(this.rpcServer.getListenAddress());

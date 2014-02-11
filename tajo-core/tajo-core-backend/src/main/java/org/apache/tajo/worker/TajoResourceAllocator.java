@@ -177,7 +177,7 @@ public class TajoResourceAllocator extends AbstractResourceAllocator {
     }
   }
 
-  protected class LaunchRunner implements Runnable {
+  protected static class LaunchRunner implements Runnable {
     private final ContainerProxy proxy;
     private final ContainerId id;
     public LaunchRunner(ContainerId id, ContainerProxy proxy) {
@@ -198,7 +198,7 @@ public class TajoResourceAllocator extends AbstractResourceAllocator {
     }
   }
 
-  private class StopContainerRunner implements Runnable {
+  private static class StopContainerRunner implements Runnable {
     private final ContainerProxy proxy;
     private final ContainerId id;
     public StopContainerRunner(ContainerId id, ContainerProxy proxy) {
@@ -256,8 +256,6 @@ public class TajoResourceAllocator extends AbstractResourceAllocator {
         TajoMasterProtocol.TajoMasterProtocolService masterClientService = tmClient.getStub();
         masterClientService.allocateWorkerResources(null, request, callBack);
       } catch (Exception e) {
-        connPool.closeConnection(tmClient);
-        tmClient = null;
         LOG.error(e.getMessage(), e);
       } finally {
         connPool.releaseConnection(tmClient);

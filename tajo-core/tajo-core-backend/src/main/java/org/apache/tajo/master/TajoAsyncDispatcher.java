@@ -77,8 +77,8 @@ public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher 
                 eventHandlingThread.wait(1000);
               }
             } catch (InterruptedException e) {
-              if (!stopped.get()) {
-                LOG.warn("AsyncDispatcher thread interrupted");
+              if (!stopped.getAndSet(true)) {
+                LOG.error("AsyncDispatcher thread interrupted", e);
               }
               break;
             }
@@ -106,9 +106,8 @@ public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher 
     eventHandlingThread.start();
 
     LOG.info("AsyncDispatcher started:" + id);
-    stoped += 1;
   }
-  private int stoped = 0;
+
   @Override
   public synchronized void stop() {
     if(stopped.getAndSet(true)) {
@@ -211,6 +210,7 @@ public class TajoAsyncDispatcher extends AbstractService  implements Dispatcher 
       }
 
       eventQueue.offer(event);
+
       if (eventHandlingThread != null) {
         synchronized (eventHandlingThread) {
           eventHandlingThread.notifyAll();

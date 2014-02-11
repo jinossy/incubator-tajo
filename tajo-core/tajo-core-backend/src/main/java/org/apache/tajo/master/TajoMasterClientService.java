@@ -82,10 +82,12 @@ public class TajoMasterClientService extends AbstractService {
     // start the rpc server
     String confClientServiceAddr = conf.getVar(ConfVars.TAJO_MASTER_CLIENT_RPC_ADDRESS);
     InetSocketAddress initIsa = NetUtils.createSocketAddr(confClientServiceAddr);
+    int nettyWorkerNum = conf.getIntVar(ConfVars.MASTER_SERVICE_RPC_SERVER_IO_THREAD_NUM);
     try {
-      server = new BlockingRpcServer(TajoMasterClientProtocol.class, clientHandler, initIsa);
+      server = new BlockingRpcServer(TajoMasterClientProtocol.class, clientHandler, initIsa, nettyWorkerNum);
     } catch (Exception e) {
       LOG.error(e);
+      throw new RuntimeException(e);
     }
     server.start();
 

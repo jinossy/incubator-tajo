@@ -54,23 +54,18 @@ public abstract class NettyClientBase implements Closeable {
       this.bootstrap.setOption("tcpNoDelay", true);
       this.bootstrap.setOption("keepAlive", true);
 
-      this.bootstrap.setOption("remoteAddress", addr);
-      this.channelFuture = bootstrap.connect();
-      this.channelFuture.awaitUninterruptibly();
-      if (!channelFuture.isSuccess()) {
-        channelFuture.getCause().printStackTrace();
-        throw new RuntimeException(channelFuture.getCause());
-      }
+      connect(addr);
     } catch (Throwable t) {
       close();
       throw new IOException(t.getCause());
     }
   }
 
-  public void reconnect(){
-    this.channelFuture = bootstrap.connect();
+  public void connect(InetSocketAddress addr) {
+    this.channelFuture = bootstrap.connect(addr);
     this.channelFuture.awaitUninterruptibly();
     if (!channelFuture.isSuccess()) {
+      channelFuture.getCause().printStackTrace();
       throw new RuntimeException(channelFuture.getCause());
     }
   }

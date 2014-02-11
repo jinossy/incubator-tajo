@@ -61,7 +61,7 @@ public class BlockingRpcClient extends NettyClientBase {
    */
   BlockingRpcClient(final Class<?> protocol,
                  final InetSocketAddress addr) throws Exception {
-    this(protocol, addr, RpcConnectionPool.getChannelFactory());
+    this(protocol, addr, NettyWokerFactory.getSharedClientChannelFactory());
   }
 
   BlockingRpcClient(final Class<?> protocol,

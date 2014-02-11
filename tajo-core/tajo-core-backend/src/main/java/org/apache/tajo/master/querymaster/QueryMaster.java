@@ -178,8 +178,6 @@ public class QueryMaster extends CompositeService implements EventHandler {
 
         tajoWorkerProtocolService.cleanup(null, queryId.getProto(), NullCallback.get());
       } catch (Exception e) {
-        connPool.closeConnection(rpc);
-        rpc = null;
         LOG.error(e.getMessage());
       } finally {
         connPool.releaseConnection(rpc);
@@ -203,8 +201,6 @@ public class QueryMaster extends CompositeService implements EventHandler {
       TajoMasterProtocol.WorkerResourcesRequest workerResourcesRequest = callBack.get(2, TimeUnit.SECONDS);
       return workerResourcesRequest.getWorkerResourcesList();
     } catch (Exception e) {
-      connPool.closeConnection(rpc);
-      rpc = null;
       LOG.error(e.getMessage(), e);
     } finally {
       connPool.releaseConnection(rpc);
@@ -233,8 +229,6 @@ public class QueryMaster extends CompositeService implements EventHandler {
 
       masterClientService.heartbeat(callBack.getController(), queryHeartbeatBuilder.build(), callBack);
     } catch (Exception e) {
-      connPool.closeConnection(tmClient);
-      tmClient = null;
       LOG.error(e.getMessage(), e);
     } finally {
       connPool.releaseConnection(tmClient);
