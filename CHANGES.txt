@@ -130,6 +130,8 @@ Release 0.8.0 - unreleased
 
   IMPROVEMENTS
 
+    TAJO-584: Improve distributed merge sort. (hyunsik)
+
     TAJO-36: Improve ExternalSortExec with N-merge sort and final pass
     omission. (hyunsik)
 
@@ -245,6 +247,9 @@ Release 0.8.0 - unreleased
     (Keuntae Park via jihoon)
 
   BUG FIXES
+
+    TAJO-593: outer groupby and groupby in derived table causes only one
+    shuffle output number. (hyunsik)
 
     TAJO-583: Broadcast join does not work on partitioned tables. (hyunsik)
 
